@@ -1,2 +1,2 @@
-# alexa-skill-tester
-Provide a test driver for Alexa skills
+# alexa-skill-test-driver
+Test driver for Alexa skill conversations
