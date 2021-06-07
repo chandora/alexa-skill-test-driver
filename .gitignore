@@ -1,3 +1,8 @@
+# by tkawa
+.vscode
+dist/
+src/archive
+*.code-workspace
 # Logs
 logs
 *.log

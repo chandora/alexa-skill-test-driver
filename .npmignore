@@ -1,0 +1,8 @@
+src/
+dist/archive/
+node_modules/
+dist/test*/
+.vscode/
+coverage/
+*.code-workspace
+tsconfig.json

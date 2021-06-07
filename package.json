@@ -1,10 +1,14 @@
 {
   "name": "alexa-skill-test-driver",
-  "version": "0.1.0",
-  "description": "Test driver for Alexa skill conversations",
+  "version": "0.5.1",
+  "description": "Test driver for Alexa Skill conversations",
   "main": "dist/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "cd dist & mocha test --timeout 10000 --slow 3000",
+    "test-all": "cd dist & mocha test-all --timeout 30000",
+    "test-skipping": "cd dist & mocha test-skipping --timeout 30000",
+    "target": "cd dist & mocha ./test/test-launch-and-order-drink.js -timeout 60000",
+    "debug": "node --inspect ./dist/test-hello-world/test-hello-world.js"
   },
   "keywords": [
     "Alexa",
@@ -14,8 +18,25 @@
   ],
   "author": "KAWAMURA Tateo",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chandora/alexa-skill-test-driver.git"
+  },
+  "homepage": "https://github.com/chandora/alexa-skill-test-driver",
+  "bugs": {
+    "url": "https://github.com/chandora/alexa-skill-test-driver/issues"
+  },
   "dependencies": {
     "ask-sdk-model": "^1.35.1",
-    "ask-smapi-model": "^1.15.2"
+    "ask-smapi-model": "^1.15.2",
+    "ask-smapi-sdk": "^1.3.0",
+    "chai": "^4.3.4",
+    "mocha": "^8.4.0",
+    "path": "^0.12.7"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.2.18",
+    "@types/mocha": "^8.2.2",
+    "@types/node": "^15.0.2"
   }
 }
