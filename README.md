@@ -34,6 +34,13 @@ your test data as JavaScript or TypeScript code.
 However you do not need to write validation codes by yourself.
 You just need to define the input utterance and the expected output to/from a Skill.
 
+## Installation
+
+```bash
+npm i alexa-skill-test-driver --save-dev
+```
+
+## Sample Test Data for Hello World Skill
 The following is an example of a test code for Hello World skill (a sample skill provided by Amazon).
 
 ```typescript
@@ -119,7 +126,7 @@ const testData: Astd.TestData = {
     ]
 };
 
-(async () => await Astd.executeTestData(testData, config))();
+Astd.executeTest(testData, config);
 ```
 config.json should have the following tags:
 
@@ -221,6 +228,14 @@ ASTDは、Mochaによって実行されます。
 
 ただし、検証のためのコードは書く必要はありません。
 必要なのは、スキルへのインプットとなる発話と期待されるスキルからのアウトプットの定義です。
+
+## インストレーション
+
+```bach
+npm i alexa-skill-test-driver --save-dev
+```
+
+## サンプルテストデータ (Hello Worldスキル)
 
 Amazonの提供するサンプルスキルであるHello Worldスキルに対応した、
 テストコードとテスト結果ののサンプルを示します。(上方にある英語版の説明に含まれています)
