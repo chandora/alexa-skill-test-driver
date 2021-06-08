@@ -179,7 +179,7 @@ The following is the output from the test execution.
 
 You can find the test data in the following Git repositry:
 
-https://github.com/chandora/samples-alexa-skill-hello-world
+https://github.com/chandora/samples-astd-hello-world
 
 See the change history at the bottom.
 
@@ -236,7 +236,7 @@ config.jsonには下記の項目が含まれています。
 
 テストデータは下記のGitレポジトリにあります。
 
-https://github.com/chandora/samples-alexa-skill-hello-world
+https://github.com/chandora/samples-astd-hello-world
 
 
 ## Change History:
