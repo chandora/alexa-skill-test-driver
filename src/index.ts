@@ -1,3 +1,10 @@
+/**
+ * Alexa Skill Test Driver
+ * 
+ * Copyright (C) 2021, KAWAMURA Tateo, All Rights Reserved.
+ * 
+ */
+'strict'
 import * as Model from 'ask-sdk-model';
 import * as Smapi from 'ask-smapi-sdk';
 import * as SmModel from 'ask-smapi-model';
@@ -15,29 +22,51 @@ function sleep(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-export type DelegateOutputSpeech = { type: 'Delegate', prompts: string | string[] };
-export type DirectiveOutputSpeech = { type: 'Directive', text?: string };
-export type AnyOutputSpeech = { type: 'Any' };
-export type OutputSpeech = Model.ui.OutputSpeech | DelegateOutputSpeech | DirectiveOutputSpeech | AnyOutputSpeech | undefined;
+export type OutputSpeech = Model.ui.OutputSpeech;
 export type SessionMode = SmModel.v2.skill.simulations.SessionMode;
 export type Reprompt = Model.ui.Reprompt;
 export type Card = Model.ui.Card;
+export type StandardOutput = {
+    type?: 'Standard',
+    outputSpeech: OutputSpeech,
+    card?: Card,
+    reprompt?: OutputSpeech,
+    shouldEndSession?: boolean,
+};
+export type DirectiveOutput = {
+    type: 'Directive',
+    outputSpeech?: OutputSpeech,
+    card?: Card,
+    reprompt?: OutputSpeech,
+    shouldEndSession?: boolean,
+    directives?: Model.Directive[],
+    directivePrompts?: string[]
+};
+export type Output = StandardOutput | DirectiveOutput;
 
-export type TestTurn = {
+export type TestTurnAny = {
+    skipValidation: true,
     preProcessor?: PreProcessor,
     input: {
         speak: string,
         mode?: SessionMode
     },
-    output: {
-        outputSpeech: OutputSpeech,
-        card?: Card,
-        reprompt?: OutputSpeech,
-        shouldEndSession?: boolean,
-        directives?: Model.Directive[]
-    },
+    output?: Output,
     postProcessor?: TurnPostProcessor
 };
+
+export type TestTurnSolid = {
+    skipValidation?: false,
+    preProcessor?: PreProcessor,
+    input: {
+        speak: string,
+        mode?: SessionMode
+    },
+    output: Output
+    postProcessor?: TurnPostProcessor
+};
+
+export type TestTurn = TestTurnSolid | TestTurnAny;
 
 export type TestCase = {
     title: string,
@@ -143,6 +172,11 @@ function getShouldEndSession(simulationResult: SimulationsApiResponse): boolean 
     return response?.shouldEndSession;
 }
 
+function getDirectives(simulationResult: SimulationsApiResponse): Model.Directive[] | undefined {
+    const response = getResponse(simulationResult);
+    return response?.directives;
+}
+
 function isAskForPermissionCard(card: Model.ui.Card | undefined): card is Model.ui.AskForPermissionsConsentCard {
     return card?.type === 'AskForPermissionsConsent';
 }
@@ -167,16 +201,12 @@ function isPlainTextOutputSpeech(outputSpeech: OutputSpeech | undefined): output
     return outputSpeech?.type === 'PlainText'
 }
 
-function isDelegateOutputSpeech(outputSpeech: OutputSpeech | undefined): outputSpeech is DelegateOutputSpeech {
-    return outputSpeech?.type === 'Delegate'
+function isDirectiveOutput(output: Output): output is DirectiveOutput {
+    return output.type === 'Directive';
 }
 
-function isDirectiveOutputSpeech(outputSpeech: OutputSpeech | undefined): outputSpeech is DirectiveOutputSpeech {
-    return outputSpeech?.type === 'Directive'
-}
-
-function isAnyOutputSpeech(outputSpeech: OutputSpeech | undefined): outputSpeech is AnyOutputSpeech {
-    return outputSpeech?.type === 'Any'
+function shouldSkipValidation(turn: TestTurn): boolean {
+    return turn.skipValidation === true;
 }
 
 
@@ -209,7 +239,7 @@ function convertToPlainText(text?: string) {
     return text?.replace('<speak>', '').replace('</speak>', '');
 }
 
-export function executeTestGroup(
+export function executeTest(
     testGroup: TestData,
     config: any,
     acceptUnexpectedDelegation?: boolean,
@@ -333,11 +363,11 @@ async function executeTestTurn(turn: TestTurn, turnNumber: number, smapiClient: 
                 await turn.preProcessor();
             }
 
-            if (isSsmlOutputSpeech(turn.output.outputSpeech)) {
+            if (turn.output && isSsmlOutputSpeech(turn.output.outputSpeech)) {
                 turn.output.outputSpeech.ssml = convertToSsml(turn.output.outputSpeech.ssml);
             }
 
-            if (isSsmlOutputSpeech(turn.output.reprompt)) {
+            if (turn.output && isSsmlOutputSpeech(turn.output.reprompt)) {
                 turn.output.reprompt.ssml = convertToSsml(turn.output.reprompt.ssml);
             }
 
@@ -370,8 +400,6 @@ async function executeTestTurn(turn: TestTurn, turnNumber: number, smapiClient: 
                         await sleep(1000);
                         apiResponse = await smapiClient.getSkillSimulationV2(skillId, 'development', simulationId);
                     }
-                    // process.stdout.write('\n');
-                    // print(' completed');
                 }
                 else if (apiResponse.status === 'SUCCESSFUL') {
                     break;
@@ -404,34 +432,15 @@ async function executeTestTurn(turn: TestTurn, turnNumber: number, smapiClient: 
                 print(JSON.stringify(getResponse(apiResponse), null, 2));
             }
 
-            const actualOutputSpeech = getOutputSpeech(apiResponse);
-            const toBeOutputSpeech = turn.output.outputSpeech;
-
-            if (isAnyOutputSpeech(toBeOutputSpeech)) {
+            if (turn.skipValidation) {
+                print('#### Skipping validation ...');
                 // Do nothing ...
             }
-            else if (hasDirective(apiResponse)) {
+            else if (hasDirective(apiResponse) && !isDirectiveOutput(turn.output)) {
                 if (getDirectiveType(apiResponse) === 'Dialog.Delegate') {
-                    if (isDelegateOutputSpeech(toBeOutputSpeech)) {
-                        // Expected Dialog Delegation
-                        if (Array.isArray(toBeOutputSpeech.prompts)) {
-                            let matched = false;
-                            for (const toBe of toBeOutputSpeech.prompts) {
-                                if (caption === toBe) {
-                                    matched = true;
-                                    break;
-                                }
-                            }
-                            if (!matched) {
-                                assert.fail(`No Caption Matched: ${caption}`);
-                            }
-                        }
-                        else {
-                            assert.equal(caption, toBeOutputSpeech.prompts, 'Unmatched Caption')
-                        }
-                    }
-                    else if (acceptUnexpectedDelegation) {
-                        print(`........ UNEXPECTED DELEGATION (Accepted) !!!`);
+                    if (acceptUnexpectedDelegation) {
+                        print(`#### UNEXPECTED DELEGATION (Accepted) ####`);
+                        const toBeOutputSpeech = turn.output.outputSpeech;
 
                         if (isSsmlOutputSpeech(toBeOutputSpeech)) {
                             assert.equal(caption, convertToPlainText(toBeOutputSpeech.ssml), 'Unexpected Delegation & Unmatched Caption')
@@ -441,45 +450,58 @@ async function executeTestTurn(turn: TestTurn, turnNumber: number, smapiClient: 
                         }
                     }
                     else {
-                        print(`........ UNEXPECTED DELEGATION (Denied) !!!`);
+                        print(`#### UNEXPECTED DELEGATION (Denied) ####`);
                         assert.fail(`Unexpected Dialog.Delegate directived`);
                     }
                 }
                 else {
-                    if (isDirectiveOutputSpeech(toBeOutputSpeech)) {
-                        assert.equal(caption, toBeOutputSpeech?.text, 'Unmatched Text for Directive');
-                    }
-                    else {
-                        assert.fail(`Unmatched OutputSpeech Type: Actual=Directive, ToBe=${toBeOutputSpeech?.type}`);
-                    }
-
-                    assert.deepEqual(getResponse(apiResponse)?.directives, turn.output.directives);
+                    print(`#### UNEXPECTED DIRECTIVE ${getDirectiveType(apiResponse)}`);
+                    assert.fail(`Unexpected directive: ${getDirectiveType(apiResponse)}`);
                 }
             }
             else {
-                // if (actualOutputSpeech) {
+                const actualOutputSpeech = getOutputSpeech(apiResponse);
+                const toBeOutputSpeech = turn.output.outputSpeech;
                 assert.deepEqual(actualOutputSpeech, toBeOutputSpeech, 'Unmatched OutputSpeech');
-                // }
-                // else {
-                //     assert.fail('OutputSpeech not found in Api response.');
-                // }
 
                 const actualCard = getCard(apiResponse);
                 const toBeCard = turn.output.card;
                 if ((toBeCard || !skipUndefinedToBe) && (actualCard || !skipUndefinedActual)) {
-                    validateCard(actualCard, turn.output.card);
+                    validateCard(actualCard, toBeCard);
                 }
 
                 const actualReprompt = getReprompt(apiResponse);
                 const toBeReprompt = turn.output.reprompt;
                 if ((toBeReprompt || !skipUndefinedToBe) && (actualReprompt || !skipUndefinedActual)) {
-                    assert.deepEqual(getReprompt(apiResponse), turn.output.reprompt, 'Unmatched Reprompt');
+                    assert.deepEqual(actualReprompt, toBeReprompt, 'Unmatched Reprompt');
                 }
 
                 const actualShouldEndSession = getShouldEndSession(apiResponse);
                 const toBeShouldEndSession = turn.output.shouldEndSession;
                 if ((toBeShouldEndSession || !skipUndefinedToBe) && (actualShouldEndSession || !skipUndefinedActual)) {
-                    assert.equal(getShouldEndSession(apiResponse), turn.output.shouldEndSession, 'Unmatched ShouldEndSession');
+                    assert.equal(actualShouldEndSession, toBeShouldEndSession, 'Unmatched ShouldEndSession');
+                }
+
+                if (isDirectiveOutput(turn.output)) {
+                    if (turn.output.directivePrompts) {
+                        let matched = false;
+                        for (const toBe of turn.output.directivePrompts) {
+                            if (caption === toBe) {
+                                matched = true;
+                                break;
+                            }
+                        }
+                        if (!matched) {
+                            assert.fail(`No Caption Matched with Directive Prompts: ${caption}`);
+                        }
+                    }
+
+                    const actualDirectives = getDirectives(apiResponse);
+                    const toBeDirectives = turn.output.directives;
+                    if ((toBeDirectives) && (actualDirectives || !skipUndefinedActual)) {
+                        // If toBeDirectives is undefined, then its validation is skipped even if skipUndefinedToBe is false.
+                        assert.deepEqual(actualDirectives, toBeDirectives, 'Unmatched Directives');
+                    }
                 }
             }
 

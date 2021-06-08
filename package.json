@@ -3,13 +3,7 @@
   "version": "0.5.1",
   "description": "Test driver for Alexa Skill conversations",
   "main": "dist/index.js",
-  "scripts": {
-    "test": "cd dist & mocha test --timeout 10000 --slow 3000",
-    "test-all": "cd dist & mocha test-all --timeout 30000",
-    "test-skipping": "cd dist & mocha test-skipping --timeout 30000",
-    "target": "cd dist & mocha ./test/test-launch-and-order-drink.js -timeout 60000",
-    "debug": "node --inspect ./dist/test-hello-world/test-hello-world.js"
-  },
+  "scripts": {},
   "keywords": [
     "Alexa",
     "Skill",

@@ -1,5 +1,5 @@
 # Alexa Skill Test Driver
-(Under Beta Testing / 後半に日本語の説明あり)
+(後半に日本語の説明あり)
 
 The Alexa Skill Test Driver (ASTD) supports the automation of Alexa conversation 
 testing for the Alexa custom skill development.
@@ -177,15 +177,13 @@ The following is the output from the test execution.
   4 passing (12s)
 ```
 
-You can find the source code in the following Git repositry:
+You can find the test data in the following Git repositry:
 
 https://github.com/chandora/samples-alexa-skill-hello-world
 
 See the change history at the bottom.
 
 # Alexa Skill Test Driver
-
-(ベータテスト中)
 
 Alexa Skill Test Driver (ASTD)は、Alexaのスキル開発において、スキルとの対話テストの自動化を支援します。
 
@@ -236,13 +234,14 @@ config.jsonには下記の項目が含まれています。
 * client_secret - LWAから取得します
 * refresh_token - ASK CLIから取得します
 
-ソースコードは下記のGitレポジトリにあります。
+テストデータは下記のGitレポジトリにあります。
 
 https://github.com/chandora/samples-alexa-skill-hello-world
 
 
 ## Change History:
 
+* 1.0.0 - Inital Release
 * 0.5.1 - Change the class name TestGroup to TestData for better consistency
 * 0.4.14 - Add some options to execute
 * 0.4.13 - Documentation Update
