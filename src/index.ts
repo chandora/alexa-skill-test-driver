@@ -44,7 +44,7 @@ export type DirectiveOutput = {
 };
 export type Output = StandardOutput | DirectiveOutput;
 
-export type TestTurnAny = {
+export type TestTurnSkip = {
     skipValidation: true,
     preProcessor?: PreProcessor,
     input: {
@@ -55,7 +55,7 @@ export type TestTurnAny = {
     postProcessor?: TurnPostProcessor
 };
 
-export type TestTurnSolid = {
+export type TestTurnNoSkip = {
     skipValidation?: false,
     preProcessor?: PreProcessor,
     input: {
@@ -66,7 +66,7 @@ export type TestTurnSolid = {
     postProcessor?: TurnPostProcessor
 };
 
-export type TestTurn = TestTurnSolid | TestTurnAny;
+export type TestTurn = TestTurnNoSkip | TestTurnSkip;
 
 export type TestCase = {
     title: string,
@@ -95,11 +95,13 @@ export type TestCasePostProcessor = {
     (): Promise<void>
 };
 
-export function print(message: string) {
-    const messageArray = message.split('\n');
+export function print(message?: string) {
+    if (message) {
+        const messageArray = message.split('\n');
 
-    for (const msg of messageArray) {
-        console.log(`          ${msg}`);
+        for (const msg of messageArray) {
+            console.log(`          ${msg}`);
+        }
     }
 }
 
@@ -390,7 +392,14 @@ async function executeTestTurn(turn: TestTurn, turnNumber: number, smapiClient: 
             let retry = 0;
 
             do {
-                apiResponse = await smapiClient.simulateSkillV2(skillId, 'development', simulationRequest);
+                try {
+                    apiResponse = await smapiClient.simulateSkillV2(skillId, 'development', simulationRequest);
+                }
+                catch (error) {
+                    print(` Simulation API failed (NAME=${error.name}, RC=${error.statusCode}, MSG=${error.response?.message})\n`);
+                    throw error;
+                }
+
                 const simulationId = apiResponse.id;
 
                 if (simulationId) {
@@ -398,7 +407,14 @@ async function executeTestTurn(turn: TestTurn, turnNumber: number, smapiClient: 
                     while (apiResponse.status === 'IN_PROGRESS') {
                         process.stdout.write('.');
                         await sleep(1000);
-                        apiResponse = await smapiClient.getSkillSimulationV2(skillId, 'development', simulationId);
+                        try {
+                            apiResponse = await smapiClient.getSkillSimulationV2(skillId, 'development', simulationId);
+                        }
+                        catch (error) {
+                            process.stdout.write('\n');
+                            print(` Simulation API failed (NAME=${error.name}, RC=${error.statusCode}, MSG=${error.response?.message})\n`);
+                            throw error;
+                        }
                     }
                 }
                 else if (apiResponse.status === 'SUCCESSFUL') {
@@ -416,9 +432,8 @@ async function executeTestTurn(turn: TestTurn, turnNumber: number, smapiClient: 
             }
             while (apiResponse.status === 'FAILED' && retry < MaxRetryForSimulationApiCall)
 
-            if (!apiResponse || apiResponse.status !== 'SUCCESSFUL') {
+            if (apiResponse.status !== 'SUCCESSFUL') {
                 print(`........ Skill simulation response = ${apiResponse.status}`)
-                print(JSON.stringify(apiResponse, null, 2));
                 assert(false, 'Skill simulation API failed');
             }
 
@@ -484,29 +499,31 @@ async function executeTestTurn(turn: TestTurn, turnNumber: number, smapiClient: 
 
                 if (isDirectiveOutput(turn.output)) {
                     if (turn.output.directivePrompts) {
-                        let matched = false;
-                        for (const toBe of turn.output.directivePrompts) {
-                            if (caption === toBe) {
-                                matched = true;
-                                break;
-                            }
-                        }
-                        if (!matched) {
-                            assert.fail(`No Caption Matched with Directive Prompts: ${caption}`);
-                        }
+                        assert.include(turn.output.directivePrompts, caption, `No Caption Matched with Directive Prompts: ${caption}`);
                     }
 
                     const actualDirectives = getDirectives(apiResponse);
                     const toBeDirectives = turn.output.directives;
+
                     if ((toBeDirectives) && (actualDirectives || !skipUndefinedActual)) {
                         // If toBeDirectives is undefined, then its validation is skipped even if skipUndefinedToBe is false.
-                        assert.deepEqual(actualDirectives, toBeDirectives, 'Unmatched Directives');
+                        if (actualDirectives) {
+                            for (const directive of toBeDirectives) {
+                                assert.deepInclude(actualDirectives, directive, `A ToBE Directive Not Matched to Acutal`);
+                            }
+                            for (const directive of actualDirectives) {
+                                assert.deepInclude(toBeDirectives, directive, `An Actual Directive Not Matched to ToBe`);
+                            }
+                        }
+                        else {
+                            assert.fail('No Directive in Response');
+                        }
                     }
                 }
-            }
 
-            if (turn.postProcessor) {
-                await turn.postProcessor(apiResponse);
+                if (turn.postProcessor) {
+                    await turn.postProcessor(apiResponse);
+                }
             }
         });
     });
