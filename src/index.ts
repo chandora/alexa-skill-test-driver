@@ -42,7 +42,32 @@ export type DirectiveOutput = {
     directives?: Model.Directive[],
     directivePrompts?: string[]
 };
-export type Output = StandardOutput | DirectiveOutput;
+export type DialogDelegateOutput = {
+    type: 'Dialog.Delegate',
+    outputSpeech?: OutputSpeech,
+    card?: Card,
+    reprompt?: OutputSpeech,
+    shouldEndSession?: boolean,
+    directives?: Model.Directive[],
+    directivePrompts: string[]
+};
+export type DialogOthersOutput = {
+    type: 'Dialog.ElicitSlot' | 'Dialog.ConfirmSlot' | 'Dialog.ConfirmIntent',
+    outputSpeech?: OutputSpeech,
+    card?: Card,
+    reprompt?: OutputSpeech,
+    shouldEndSession?: boolean,
+    directives?: Model.Directive[],
+};
+export type APLOutput = {
+    type: 'APL',
+    outputSpeech?: OutputSpeech,
+    card?: Card,
+    reprompt?: OutputSpeech,
+    shouldEndSession?: boolean,
+    directives?: Model.Directive[],
+};
+export type Output = StandardOutput | DirectiveOutput | DialogDelegateOutput | DialogOthersOutput | APLOutput;
 
 export type TestTurnSkip = {
     skipValidation: true,
@@ -118,7 +143,9 @@ function hasDirective(simulationResult: SimulationsApiResponse): boolean {
 function getDirectiveType(simulationResult: SimulationsApiResponse): string | undefined {
     const invocationResponse = getInvocationResponse(simulationResult);
 
-    return invocationResponse?.body?.response?.directives[0]?.type;
+    return invocationResponse?.body?.response?.directives ?
+        invocationResponse?.body?.response?.directives[0]?.type :
+        undefined;
 }
 
 function getInvocationResponse(simulationResult: SimulationsApiResponse): InvocationResponse | undefined {
@@ -241,6 +268,10 @@ function convertToPlainText(text?: string) {
     return text?.replace('<speak>', '').replace('</speak>', '');
 }
 
+function getOutputType(output: Output) {
+    return output.type;
+}
+
 export function executeTest(
     testGroup: TestData,
     config: any,
@@ -358,6 +389,107 @@ async function executeTestCase(testCase: TestCase, smapiClient: SmapiClient, ski
     });
 }
 
+export async function invokeSkill(
+    config: any,
+    speak: string,
+    locale: string,
+    mode: SessionMode) {
+
+    const refreshTokenConfig: Smapi.RefreshTokenConfig = {
+        clientId: config.client_id,
+        clientSecret: config.client_secret,
+        refreshToken: config.refresh_token
+    };
+
+    const smapiClient = new Smapi.StandardSmapiClientBuilder()
+        .withRefreshTokenConfig(refreshTokenConfig)
+        .client();
+
+    const skillId = config.skill_id;
+
+    return _invokeSkill(smapiClient, speak, skillId, locale, mode);
+}
+
+async function _invokeSkill(
+    smapiClient: SmapiClient,
+    speak: string,
+    skillId: string,
+    locale: string,
+    mode: SessionMode) {
+
+    const simulationRequest: SmModel.v2.skill.simulations.SimulationsApiRequest = {
+        session: {
+            mode: mode
+        },
+        input: {
+            content: speak
+        },
+        device: {
+            locale: locale
+        }
+    };
+
+    print(".............................");
+    print(`... U: ${speak}`);
+
+    let apiResponse: SmModel.v2.skill.simulations.SimulationsApiResponse;
+    let retry = 0;
+
+    do {
+        try {
+            apiResponse = await smapiClient.simulateSkillV2(skillId, 'development', simulationRequest);
+        }
+        catch (error: any) {
+            print(` Simulation API failed (NAME=${error.name}, RC=${error.statusCode}, MSG=${error.response?.message})\n`);
+            throw error;
+        }
+
+        const simulationId = apiResponse.id;
+
+        if (simulationId) {
+            process.stdout.write('          ... ');
+            while (apiResponse.status === 'IN_PROGRESS') {
+                process.stdout.write('.');
+                await sleep(1000);
+                try {
+                    apiResponse = await smapiClient.getSkillSimulationV2(skillId, 'development', simulationId);
+                }
+                catch (error: any) {
+                    process.stdout.write('\n');
+                    print(` Simulation API failed (NAME=${error.name}, RC=${error.statusCode}, MSG=${error.response?.message})\n`);
+                    throw error;
+                }
+            }
+        }
+        else if (apiResponse.status === 'SUCCESSFUL') {
+            break;
+        }
+        else {
+            print(' no simulation Id');
+            assert.fail('No simulationId returned from Simulation.');
+        }
+
+        if (apiResponse.status === 'FAILED') {
+            process.stdout.write(` Simulation API failed (RC=${apiResponse.result?.error?.code}, MSG=${apiResponse.result?.error?.message}), retry ...\n`);
+            ++retry;
+        }
+    }
+    while (apiResponse.status === 'FAILED' && retry < MaxRetryForSimulationApiCall)
+
+    if (apiResponse.status !== 'SUCCESSFUL') {
+        print(`........ Skill simulation response = ${apiResponse.status}`)
+        assert(false, 'Skill simulation API failed');
+    }
+
+    process.stdout.write('\r');
+
+    const caption = getCaption(apiResponse);
+    print(`... A: ${caption}`);
+    print(".............................");
+
+    return apiResponse;
+}
+
 async function executeTestTurn(turn: TestTurn, turnNumber: number, smapiClient: SmapiClient, skillId: string, locale: string, acceptUnexpectedDelegation: boolean, dumpResponse: boolean, skipUndefinedToBe: boolean, skipUndefinedActual: boolean) {
     describe(`Turn: ${turnNumber}`, function () {
         it(`Validating Turn ${turnNumber}`, async function () {
@@ -373,75 +505,8 @@ async function executeTestTurn(turn: TestTurn, turnNumber: number, smapiClient: 
                 turn.output.reprompt.ssml = convertToSsml(turn.output.reprompt.ssml);
             }
 
-            const simulationRequest: SmModel.v2.skill.simulations.SimulationsApiRequest = {
-                session: {
-                    mode: turn.input.mode ? turn.input.mode : 'DEFAULT'
-                },
-                input: {
-                    content: turn.input.speak
-                },
-                device: {
-                    locale: locale
-                }
-            };
-
-            print(".............................");
-            print(`... U: ${turn.input.speak}`);
-
-            let apiResponse: SmModel.v2.skill.simulations.SimulationsApiResponse;
-            let retry = 0;
-
-            do {
-                try {
-                    apiResponse = await smapiClient.simulateSkillV2(skillId, 'development', simulationRequest);
-                }
-                catch (error) {
-                    print(` Simulation API failed (NAME=${error.name}, RC=${error.statusCode}, MSG=${error.response?.message})\n`);
-                    throw error;
-                }
-
-                const simulationId = apiResponse.id;
-
-                if (simulationId) {
-                    process.stdout.write('          ... ');
-                    while (apiResponse.status === 'IN_PROGRESS') {
-                        process.stdout.write('.');
-                        await sleep(1000);
-                        try {
-                            apiResponse = await smapiClient.getSkillSimulationV2(skillId, 'development', simulationId);
-                        }
-                        catch (error) {
-                            process.stdout.write('\n');
-                            print(` Simulation API failed (NAME=${error.name}, RC=${error.statusCode}, MSG=${error.response?.message})\n`);
-                            throw error;
-                        }
-                    }
-                }
-                else if (apiResponse.status === 'SUCCESSFUL') {
-                    break;
-                }
-                else {
-                    print(' no simulation Id');
-                    assert.fail('No simulationId returned from Simulation.');
-                }
-
-                if (apiResponse.status === 'FAILED') {
-                    process.stdout.write(` Simulation API failed (RC=${apiResponse.result?.error?.code}, MSG=${apiResponse.result?.error?.message}), retry ...\n`);
-                    ++retry;
-                }
-            }
-            while (apiResponse.status === 'FAILED' && retry < MaxRetryForSimulationApiCall)
-
-            if (apiResponse.status !== 'SUCCESSFUL') {
-                print(`........ Skill simulation response = ${apiResponse.status}`)
-                assert(false, 'Skill simulation API failed');
-            }
-
-            process.stdout.write('\r');
-
-            const caption = getCaption(apiResponse);
-            print(`... A: ${caption}`);
-            print(".............................");
+            const mode = turn.input.mode ? turn.input.mode : 'DEFAULT'
+            const apiResponse = await _invokeSkill(smapiClient, turn.input.speak, skillId, locale, mode);
 
             if (dumpResponse) {
                 print(JSON.stringify(getResponse(apiResponse), null, 2));
@@ -451,11 +516,12 @@ async function executeTestTurn(turn: TestTurn, turnNumber: number, smapiClient: 
                 print('#### Skipping validation ...');
                 // Do nothing ...
             }
-            else if (hasDirective(apiResponse) && !isDirectiveOutput(turn.output)) {
-                if (getDirectiveType(apiResponse) === 'Dialog.Delegate') {
+            else if (getDirectiveType(apiResponse) === 'Dialog.Delegate') {
+                if (!getOutputType(turn.output) || getOutputType(turn.output) === 'APL') {
                     if (acceptUnexpectedDelegation) {
                         print(`#### UNEXPECTED DELEGATION (Accepted) ####`);
                         const toBeOutputSpeech = turn.output.outputSpeech;
+                        const caption = getCaption(apiResponse);
 
                         if (isSsmlOutputSpeech(toBeOutputSpeech)) {
                             assert.equal(caption, convertToPlainText(toBeOutputSpeech.ssml), 'Unexpected Delegation & Unmatched Caption')
@@ -466,65 +532,97 @@ async function executeTestTurn(turn: TestTurn, turnNumber: number, smapiClient: 
                     }
                     else {
                         print(`#### UNEXPECTED DELEGATION (Denied) ####`);
-                        assert.fail(`Unexpected Dialog.Delegate directived`);
+                        assert.fail(`Unexpected Dialog.Delegate directived to ${getOutputType(turn.output)}`);
                     }
                 }
                 else {
-                    print(`#### UNEXPECTED DIRECTIVE ${getDirectiveType(apiResponse)}`);
-                    assert.fail(`Unexpected directive: ${getDirectiveType(apiResponse)}`);
+
+                }
+            }
+            else if (getDirectiveType(apiResponse) === 'Dialog.ElicitSlot') {
+                if (!getOutputType(turn.output) || getOutputType(turn.output) === 'APL') {
+                    assert.fail(`Unexpected DialogElicitSlot directive to ${getOutputType(turn.output)}`);
+                }
+                else {
+                    checkOutput(apiResponse, turn.output, skipUndefinedActual, skipUndefinedToBe);
+                }
+            }
+            else if (getDirectiveType(apiResponse) === 'Alexa.Presentation.APL.RenderDocument') {
+                if (getOutputType(turn.output) === 'APL') {
+                    checkOutput(apiResponse, turn.output, skipUndefinedActual, skipUndefinedToBe);
+                }
+                else {
+                    assert.fail(`Unexpected APL.RenderDocument directive to ${getOutputType(turn.output)}`);
                 }
             }
             else {
-                const actualOutputSpeech = getOutputSpeech(apiResponse);
-                const toBeOutputSpeech = turn.output.outputSpeech;
-                assert.deepEqual(actualOutputSpeech, toBeOutputSpeech, 'Unmatched OutputSpeech');
+                checkOutput(apiResponse, turn.output, skipUndefinedActual, skipUndefinedToBe);
+            }
 
-                const actualCard = getCard(apiResponse);
-                const toBeCard = turn.output.card;
-                if ((toBeCard || !skipUndefinedToBe) && (actualCard || !skipUndefinedActual)) {
-                    validateCard(actualCard, toBeCard);
-                }
-
-                const actualReprompt = getReprompt(apiResponse);
-                const toBeReprompt = turn.output.reprompt;
-                if ((toBeReprompt || !skipUndefinedToBe) && (actualReprompt || !skipUndefinedActual)) {
-                    assert.deepEqual(actualReprompt, toBeReprompt, 'Unmatched Reprompt');
-                }
-
-                const actualShouldEndSession = getShouldEndSession(apiResponse);
-                const toBeShouldEndSession = turn.output.shouldEndSession;
-                if ((toBeShouldEndSession || !skipUndefinedToBe) && (actualShouldEndSession || !skipUndefinedActual)) {
-                    assert.equal(actualShouldEndSession, toBeShouldEndSession, 'Unmatched ShouldEndSession');
-                }
-
-                if (isDirectiveOutput(turn.output)) {
-                    if (turn.output.directivePrompts) {
-                        assert.include(turn.output.directivePrompts, caption, `No Caption Matched with Directive Prompts: ${caption}`);
-                    }
-
-                    const actualDirectives = getDirectives(apiResponse);
-                    const toBeDirectives = turn.output.directives;
-
-                    if ((toBeDirectives) && (actualDirectives || !skipUndefinedActual)) {
-                        // If toBeDirectives is undefined, then its validation is skipped even if skipUndefinedToBe is false.
-                        if (actualDirectives) {
-                            for (const directive of toBeDirectives) {
-                                assert.deepInclude(actualDirectives, directive, `A ToBE Directive Not Matched to Acutal`);
-                            }
-                            for (const directive of actualDirectives) {
-                                assert.deepInclude(toBeDirectives, directive, `An Actual Directive Not Matched to ToBe`);
-                            }
-                        }
-                        else {
-                            assert.fail('No Directive in Response');
-                        }
-                    }
-                }
-
-                if (turn.postProcessor) {
-                    await turn.postProcessor(apiResponse);
-                }
+            if (turn.postProcessor) {
+                await turn.postProcessor(apiResponse);
             }
         });
     });
+}
+
+function checkOutput(
+    apiResponse: SmModel.v2.skill.simulations.SimulationsApiResponse,
+    output: Output,
+    skipUndefinedActual: boolean,
+    skipUndefinedToBe: boolean) {
+
+    if (!output) {
+        assert.fail('turn.output is not defined');
+    }
+
+    const actualOutputSpeech = getOutputSpeech(apiResponse);
+    const toBeOutputSpeech = output.outputSpeech;
+    assert.deepEqual(actualOutputSpeech, toBeOutputSpeech, 'Unmatched OutputSpeech');
+
+    const actualCard = getCard(apiResponse);
+    const toBeCard = output.card;
+
+    if ((toBeCard || !skipUndefinedToBe) && (actualCard || !skipUndefinedActual)) {
+        validateCard(actualCard, toBeCard);
+    }
+
+    const actualReprompt = getReprompt(apiResponse);
+    const toBeReprompt = output.reprompt;
+
+    if ((toBeReprompt || !skipUndefinedToBe) && (actualReprompt || !skipUndefinedActual)) {
+        assert.deepEqual(actualReprompt, toBeReprompt, 'Unmatched Reprompt');
+    }
+
+    const actualShouldEndSession = getShouldEndSession(apiResponse);
+    const toBeShouldEndSession = output.shouldEndSession;
+
+    if ((toBeShouldEndSession || !skipUndefinedToBe) && (actualShouldEndSession || !skipUndefinedActual)) {
+        assert.equal(actualShouldEndSession, toBeShouldEndSession, 'Unmatched ShouldEndSession');
+    }
+
+    if (isDirectiveOutput(output)) {
+        if (output.directivePrompts) {
+            const caption = getCaption(apiResponse);
+            assert.include(output.directivePrompts, caption, `No Caption Matched with Directive Prompts: ${caption}`);
+        }
+
+        const actualDirectives = getDirectives(apiResponse);
+        const toBeDirectives = output.directives;
+
+        if ((toBeDirectives) && (actualDirectives || !skipUndefinedActual)) {
+            // If toBeDirectives is undefined, then its validation is skipped even if skipUndefinedToBe is false.
+            if (actualDirectives) {
+                for (const directive of toBeDirectives) {
+                    assert.deepInclude(actualDirectives, directive, `A ToBE Directive Not Matched to Acutal`);
+                }
+                for (const directive of actualDirectives) {
+                    assert.deepInclude(toBeDirectives, directive, `An Actual Directive Not Matched to ToBe`);
+                }
+            }
+            else {
+                assert.fail('No Directive in Response');
+            }
+        }
+    }
 }
